@@ -1,14 +1,13 @@
 AWSTemplateFormatVersion: 2010-09-09
 ## =================== DESCRIPTION =================== ##
 Description: >-
-  AWS CloudFormation template 
-  Create two MultiAZ EC2 instance witj Public and private 
+  AWS CloudFormation template with LoadBalancer
+  Create two MultiAZ EC2 instance with Public and private 
     jumpbox and private Ec2 instance
     IIS server runnning
     ElasticIP
   Access website via public DNS name
 
-## =================== METADATA =================== ##
 Parameters:  
   EnvironmentName:
     Description: An environment name that will be prefixed to resource names
@@ -359,6 +358,86 @@ Resources:
         - Key: Name
           Value:  Chdev-publicEC2-Ip
 
+### SECURITY GROUPS
+  PublicLoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId:
+        Ref: VPC
+      GroupDescription: Internet facing LoadBalancer security group
+      SecurityGroupIngress:
+      - CidrIp: 0.0.0.0/0
+        FromPort: 80
+        IpProtocol: tcp
+        ToPort: 80
+      Tags:
+      - Key: Name
+        Value: chdev-loadbalancer-nsg
+      
+
+
+### LOAD BALANCER      
+  PublicLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Subnets:
+      - Ref: PublicSubnet1
+      - Ref: PublicSubnet2
+      LoadBalancerAttributes:
+      - Key: idle_timeout.timeout_seconds
+        Value: '50'
+      SecurityGroups:
+      - Ref: PublicLoadBalancerSecurityGroup
+      Tags:
+      - Key: Name
+        Value: chdev-loadbalancer
+
+  LoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref PublicLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref DefaultTargetGroup
+
+  AppServerListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: DefaultTargetGroup
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - "*"
+      ListenerArn:
+        Ref: LoadBalancerListener
+      Priority: 1
+
+  DefaultTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-default
+      Port: 80
+      Protocol: HTTP
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: '20'
+      VpcId: !Ref VPC
+      Targets:
+      - Id:
+          Ref: chdevEc2Private1
+        Port: 80
+      - Id:
+          Ref: chdevEc2Private2
+        Port: 80
+      Tags:
+      - Key: Name
+        Value: chdev-demo-loadbalancerTargetGroup
 
 Outputs:
   PublicIp:
